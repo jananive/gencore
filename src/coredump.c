@@ -562,6 +562,17 @@ int handle_request(void)
 	return 0;
 }
 
+/* Handles Signals to the Daemon */
+void sig_daemon_handler(int sig)
+{
+	close(socket_fd);
+	unlink(SOCKET_PATH);
+
+	gencore_log("[%d]: Cleanup done and daemon exiting.\n", pid_log);
+
+	fclose(fp_log);
+}
+
 /* Daemon for self dump */
 int daemon_dump(void)
 {
@@ -601,6 +612,11 @@ int daemon_dump(void)
 
 	/* SIGCHILD - Signal handler */
 	signal(SIGCHLD, sigchild_handler);
+
+	/* Terminate Daemon - signal handler */
+	signal(SIGTERM, sig_daemon_handler);
+	signal(SIGSEGV, sig_daemon_handler);
+	signal(SIGPIPE, sig_daemon_handler);
 
 	while (1) {
 
