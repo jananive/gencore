@@ -27,7 +27,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/uio.h>
+#include <sys/procfs.h>
 #include <linux/elf.h>
+#include "elf-compat.h"
 #include "coredump.h"
 
 #define roundup(x, y) ((((x) + ((y) - 1)) / (y)) * (y))
@@ -187,12 +189,68 @@ static int fill_elf_header(int pid, struct core_proc *cp)
 	return 0;
 }
 
+/* Populates PRPS_INFO */
+static int get_prpsinfo(int pid, struct core_proc *cp)
+{
+	char filename[40];
+	int ret;
+	FILE *fin;
+	struct Elf_prpsinfo prps;
+	struct pid_stat p;
+
+	ret = get_pid_stat(pid, &p);
+	if (ret)
+		return -1;
+
+	prps.pr_pid = p.ps_pid;
+	strcpy(prps.pr_fname, p.ps_comm);
+	prps.pr_state = p.ps_state;
+	prps.pr_ppid = p.__ps_ppid;
+	prps.pr_pgrp = p.__ps_pgrp;
+	prps.pr_sid = p.__ps_sid;
+	prps.pr_flag = p.__ps_flag;
+	prps.pr_nice = p.__ps_nice;
+
+	prps.pr_sname = prps.pr_state;
+	if (prps.pr_sname == 'z')
+		prps.pr_zomb = 1;
+	else
+		prps.pr_zomb = 0;
+
+	snprintf(filename, 40, "/proc/%d/cmdline", pid);
+	fin = fopen(filename, "r");
+	if (fin == NULL) {
+		status = errno;
+		gencore_log("Failure while fetching command line arguments from %s.\n", filename);
+		return -1;
+	}
+
+	/* Getting CMDLINE arguments */
+	ret = fread(prps.pr_psargs, ELF_PRARGSZ, 1, fin);
+	if (ret == -1) {
+		status = errno;
+		gencore_log("Failure while fetching command line arguments from %s.\n", filename);
+		fclose(fin);
+		return -1;
+	}
+
+	fclose(fin);
+
+	/* Adding PRPSINFO */
+	return add_note("CORE", NT_PRPSINFO, sizeof(prps), &prps, cp);
+}
+
 int do_elf_coredump(int pid, struct core_proc *cp)
 {
 	int ret;
 
 	/* Fill ELF Header */
 	ret = fill_elf_header(pid, cp);
+	if (ret)
+		return -1;
+
+	/* Get prps_info */
+	ret = get_prpsinfo(pid, cp);
 	if (ret)
 		return -1;
 

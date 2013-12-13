@@ -34,5 +34,6 @@
 #define Elf_Phdr Elf64_Phdr
 #define Elf_Shdr Elf64_Shdr
 #define Elf_Nhdr Elf64_Nhdr
+#define Elf_prpsinfo elf_prpsinfo
 
 #include "elf.c"

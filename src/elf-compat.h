@@ -1,5 +1,5 @@
 /*
- * ELF helper routines for gencore
+ * ELF structures for gencore
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,19 +21,28 @@
  *      Janani Venkataraman <jananve@in.ibm.com>
  */
 
-/*
- * We include elf.c to add all the elf specific operations here.
- * In this file, we define all 32 bit specific data and hence
- * this file would contain all elf 32 bit specific functions
- * and operations once elf.c is included.
- */
+#if defined(__PPC64__) || defined(__PPC__)
+typedef unsigned int compat_id;
+#endif
 
-#define do_elf_coredump do_elf32_coredump
+#if defined(__s390x__) || defined(__s390__)
+typedef unsigned short compat_id;
+#endif
 
-#define Elf_Ehdr Elf32_Ehdr
-#define Elf_Phdr Elf32_Phdr
-#define Elf_Shdr Elf32_Shdr
-#define Elf_Nhdr Elf32_Nhdr
-#define Elf_prpsinfo compat_elf_prpsinfo
+#if defined(__x86_64) || defined(__i386)
+typedef unsigned short compat_id;
+#endif
 
-#include "elf.c"
+/* Compat structure for PRPS_INFO */
+struct compat_elf_prpsinfo {
+	char				pr_state;
+	char				pr_sname;
+	char				pr_zomb;
+	char				pr_nice;
+	unsigned int			pr_flag;
+	compat_id			pr_uid;
+	compat_id			pr_gid;
+	int				pr_pid, pr_ppid, pr_pgrp, pr_sid;
+	char				pr_fname[16];
+	char				pr_psargs[ELF_PRARGSZ];
+};
