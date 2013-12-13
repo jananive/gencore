@@ -68,4 +68,6 @@ struct core_proc {
 	int elf_class;			/* Elf class of the process */
 	void *elf_hdr;			/* Stores the ELF_header */
 	struct mem_note *notes;		/* Head of Notes */
+	void *shdrs;			/* Extra Program Headers */
+	void *phdrs;			/* Program Headers */
 };

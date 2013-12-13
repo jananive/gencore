@@ -39,6 +39,11 @@
 
 #define roundup(x, y) ((((x) + ((y) - 1)) / (y)) * (y))
 
+/* Default alignment for program headers */
+#ifndef ELF_EXEC_PAGESIZE
+#define ELF_EXEC_PAGESIZE PAGESIZE
+#endif
+
 /* Appending the note to the list */
 static void append_note(struct mem_note *new_note, struct core_proc *cp)
 {
@@ -108,6 +113,26 @@ static int add_note(const char *name, int type, unsigned int data_sz, void *data
 	append_note(tmp, cp);
 
 	return 0;
+}
+
+/*
+ * Reads first few bytes of the address specified and checks if it is
+ * an ELF by checking the magic number.
+ */
+static int get_elf_hdr_vaddr(int pid, Elf_Ehdr *elf, Elf_Addr addr)
+{
+	int ret;
+	struct iovec local, remote;
+
+	local.iov_base = elf;
+	local.iov_len = sizeof(Elf_Ehdr);
+	remote.iov_base = (void *)addr;
+	remote.iov_len = sizeof(Elf_Ehdr);
+	ret = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+	if (ret == -1)
+		return -1;
+
+	return check_elf_hdr(elf->e_ident);
 }
 
 /* Fetchs ELF header of the executable */
@@ -568,6 +593,84 @@ static int fetch_thread_notes(struct core_proc *cp)
 	return 0;
 }
 
+/* Populate Program headers */
+static int get_phdrs(int pid, struct core_proc *cp)
+{
+	int n;
+	struct maps *map = cp->vmas;
+	Elf_Ehdr elf;
+	Elf_Phdr *cp_phdrs;
+	Elf_Shdr *cp_shdrs;
+	Elf_Ehdr *cp_elf;
+	cp_elf = (Elf_Ehdr *)cp->elf_hdr;
+
+	cp->phdrs = calloc(cp->phdrs_count, sizeof(Elf_Phdr));
+	if (!cp->phdrs) {
+		status = errno;
+		gencore_log("Could not allocate memory for Program headers.\n");
+		return -1;
+	}
+
+	cp_phdrs = (Elf_Phdr *)cp->phdrs;
+
+	cp_phdrs[0].p_type = PT_NOTE;
+	cp_phdrs[0].p_offset = 0;
+	cp_phdrs[0].p_vaddr = 0;
+	cp_phdrs[0].p_paddr = 0;
+	/* Will fill the size after filling notes */
+	cp_phdrs[0].p_filesz = 0;
+	cp_phdrs[0].p_memsz = 0;
+
+	n = 1;
+
+	while (map) {
+
+		/* Filling the Program Header Values */
+		cp_phdrs[n].p_type = PT_LOAD;
+		cp_phdrs[n].p_offset = 0;
+		cp_phdrs[n].p_vaddr = map->src;
+		cp_phdrs[n].p_paddr = 0;
+		cp_phdrs[n].p_flags = 0;
+		if (map->r == 'r')
+			cp_phdrs[n].p_flags |= PF_R;
+		if (map->w == 'w')
+			cp_phdrs[n].p_flags |= PF_W;
+		if (map->x == 'x')
+			cp_phdrs[n].p_flags |= PF_X;
+
+		cp_phdrs[n].p_memsz = map->dst - map->src;
+
+		if (!(cp_phdrs[n].p_flags & PF_R))
+			cp_phdrs[n].p_filesz = 0;
+		else if (map->inode &&
+			get_elf_hdr_vaddr(pid, &elf, cp_phdrs[n].p_vaddr) == 0)
+			cp_phdrs[n].p_filesz = ELF_EXEC_PAGESIZE;
+		else
+			cp_phdrs[n].p_filesz = cp_phdrs[n].p_memsz;
+		
+		cp_phdrs[n].p_align = ELF_EXEC_PAGESIZE;
+
+		n++;
+		map = map->next;
+	}
+
+	if (cp->phdrs_count > PN_XNUM) {
+		cp->shdrs = malloc(sizeof(Elf_Shdr));
+		if (!cp->shdrs) {
+			status = errno;
+			gencore_log("Could not allocate memory for Extra Program headers.\n");
+			return -1;
+		}
+		cp_shdrs = (Elf_Shdr *)cp->shdrs;
+		cp_shdrs->sh_type = SHT_NULL;
+		cp_shdrs->sh_size = cp_elf->e_shnum;
+		cp_shdrs->sh_link = cp_elf->e_shstrndx;
+		cp_shdrs->sh_info = cp->phdrs_count;
+	}
+
+	return 0;
+}
+
 int do_elf_coredump(int pid, struct core_proc *cp)
 {
 	int ret, i;
@@ -594,6 +697,11 @@ int do_elf_coredump(int pid, struct core_proc *cp)
 
 	/* Get the thread specific notes */
 	ret = fetch_thread_notes(cp);
+	if (ret)
+		return -1;
+
+	/* Get Program headers */
+	ret = get_phdrs(pid, cp);
 	if (ret)
 		return -1;
 

@@ -37,5 +37,6 @@
 #define Elf_prpsinfo elf_prpsinfo
 #define Elf_Long long
 #define Elf_prstatus elf_prstatus
+#define Elf_Addr Elf64_Addr
 
 #include "elf.c"

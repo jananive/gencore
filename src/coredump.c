@@ -231,6 +231,12 @@ cleanup:
 	if (cp.notes)
 		free_notes(cp.notes);
 
+	if (cp.phdrs)
+		free(cp.phdrs);
+
+	if (cp.phdrs_count)
+		free(cp.shdrs);
+
 	errno = status;
 
 	return ret;

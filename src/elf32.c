@@ -38,4 +38,6 @@
 #define Elf_Long int
 #define Elf_prstatus compat_elf_prstatus
 
+#define Elf_Addr Elf32_Addr
+
 #include "elf.c"
