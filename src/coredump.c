@@ -33,7 +33,14 @@
 #include <syslog.h>
 #include <signal.h>
 #include <sys/ptrace.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <coredump.h>
+
+/* Main Socket */
+int socket_fd;
 
 /* For logging all the messages */
 FILE *fp_log;
@@ -255,9 +262,98 @@ cleanup:
 	return ret;
 }
 
+/* Creating a Unix socket */
+int create_socket(void)
+{
+	socket_fd = socket(PF_UNIX, SOCK_STREAM, 0);
+	if (socket_fd < 0) {
+		gencore_log("[%d]: Could not create a socket:%s.\n",
+					pid_log, strerror(errno));
+		return -1;
+	}
+
+	gencore_log("[%d]: Created socket.\n", pid_log);
+
+	return 0;
+}
+
+/* Binding the socket to a address */
+int bind_socket(void)
+{
+	struct sockaddr_un address;
+	struct stat buffer;
+	if (stat(SOCKET_PATH, &buffer) == 0)
+		unlink(SOCKET_PATH);
+
+	memset(&address, 0, sizeof(struct sockaddr_un));
+
+	address.sun_family = PF_FILE;
+	strcpy(address.sun_path, SOCKET_PATH);
+
+	if (bind(socket_fd, (struct sockaddr *) &address,
+			sizeof(struct sockaddr_un)) != 0) {
+		gencore_log("[%d]: Could not bind:%s.\n", pid_log,
+							strerror(errno));
+		close(socket_fd);
+		return -1;
+	}
+
+	if (chmod(SOCKET_PATH, S_IROTH | S_IWOTH
+						| S_IRUSR | S_IWUSR)) {
+		gencore_log("[%d]: Could not change permissions of socket:%s.\n",
+						pid_log, strerror(errno));
+		close(socket_fd);
+		return -1;
+	}
+
+	gencore_log("[%d]: Bind done.\n", pid_log);
+
+	return 0;
+}
+
+/* Listen for connections */
+int listen_conn(void)
+{
+	if (listen(socket_fd, 5) != 0) {
+		gencore_log("[%d]: Could not listen:%s.\n", pid_log,
+							strerror(errno));
+		close(socket_fd);
+		return -1;
+	}
+
+	gencore_log("[%d]: Listening.\n", pid_log);
+
+	return 0;
+}
+
+/* Setting up server */
+int setup_server(void)
+{
+	int ret;
+
+	/* Create Socket */
+	ret = create_socket();
+	if (ret)
+		return -1;
+
+	/* Bind Socket */
+	ret = bind_socket();
+	if (ret)
+		return -1;
+
+	/* Listen for connections */
+	ret = listen_conn();
+	if (ret)
+		return -1;
+
+	return 0;
+}
+
 /* Daemon for self dump */
 int daemon_dump(void)
 {
+	int ret;
+
 	/* Check if daemon is running as root */
 	if (geteuid()) {
 		fprintf(stderr, "Run the daemon as root.\n");
@@ -282,7 +378,21 @@ int daemon_dump(void)
 		return -1;
 	}
 
+	/* Setting up server */
+	ret = setup_server();
+	if (ret)
+		goto cleanup;
+
+	/* Flush the log */
+	fflush(fp_log);
+
+cleanup:
+
 	fclose(fp_log);
+
+	if (ret == -1)
+		return -1;
+
 	return 0;
 }
 
