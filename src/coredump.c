@@ -183,6 +183,11 @@ int do_coredump(int pid, char *core_file)
 	if (ret)
 		goto cleanup;
 
+	/* Get VMAS */
+	ret = get_vmas(pid, &cp);
+	if (ret)
+		goto cleanup;
+
 cleanup:
 
 	/* Release the threads */
@@ -190,6 +195,9 @@ cleanup:
 
 	if (cp.t_id)
 		free(cp.t_id);
+
+	if (cp.vmas)
+		free_maps(cp.vmas);
 
 	errno = status;
 

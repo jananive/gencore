@@ -16,8 +16,19 @@ struct pid_stat {
 	unsigned long long ps_num[NUM_STAT_FEILDS];
 };
 
+/* Structure for maps */
+struct maps {
+	unsigned long long src, dst, offset;
+	char r, w, x;
+	long inode;
+	struct maps *next;
+	char fname[0];
+};
+
 /* Structure for the Core of the Process */
 struct core_proc {
 	int thread_count;		/* Number of threads */
 	int *t_id;			/* Threads_ids of all the threads */
+	struct maps *vmas;		/* VMAs */
+	int phdrs_count;		/* Number of Program headers */
 };

@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <coredump.h>
 
 /* Get Process Stats */
@@ -135,4 +136,98 @@ char get_thread_status(int tid)
 	fclose(fin);
 
 	return buff[pos - buff + 2];
+}
+
+/* Free Maps */
+void free_maps(struct maps *head)
+{
+	struct maps *tmp;
+
+	while (head) {
+		tmp = head->next;
+		free(head);
+		head = tmp;
+	}
+}
+
+/* Append a new VMA */
+void append_maps(struct maps *new_map, struct core_proc *cp)
+{
+	struct maps *tmp;
+
+	if (cp->vmas == NULL)
+		cp->vmas = new_map;
+	else {
+		tmp = cp->vmas;
+		while (tmp->next != NULL)
+			tmp = tmp->next;
+		tmp->next = new_map;
+	}
+}
+
+/* Collects virtual memory areas */
+int get_vmas(int pid, struct core_proc *cp)
+{
+	char filename[40];
+	char buff[4096];
+	char src[128];
+	char dst[128];
+	char fname[4096];
+	char page_offset[128];
+	char inode[128];
+	char r, w, x;
+	char junk[30];
+	FILE *fin;
+	struct maps *tmp;
+	long tmp_inode;
+
+	snprintf(filename, 40, "/proc/%d/maps", pid);
+	fin = fopen(filename, "r");
+	if (fin == NULL) {
+		status = errno;
+		gencore_log("Failure in fetching Memory Mappings %s.\n",
+								filename);
+		return -1;
+	}
+
+	while (fgets(buff, 4096, fin)) {
+
+		sscanf(buff, "%[^-]%c%s %c%c%c%c %s %s %s %s", src, &junk[0],
+					dst, &r, &w, &x, &junk[0],
+					page_offset, junk, inode, fname);
+
+		tmp_inode = strtol(inode, NULL, 16);
+
+		if (tmp_inode)
+			tmp = malloc(sizeof(struct maps) + strlen(fname) + 1);
+		else
+			tmp = malloc(sizeof(struct maps));
+		if (!tmp) {
+			status = errno;
+			gencore_log("Failure in allocating memory for memory maps.\n");
+			fclose(fin);
+			return -1;
+		}
+
+		tmp->src = strtoull(src, NULL, 16);
+		tmp->dst = strtoull(dst, NULL, 16);
+		tmp->offset = strtoull(page_offset, NULL, 16);
+		tmp->r = r;
+		tmp->w = w;
+		tmp->x = x;
+		tmp->inode = tmp_inode;
+
+		if (tmp->inode != 0)
+			strcpy(tmp->fname, fname);
+
+		tmp->next = NULL;
+		append_maps(tmp, cp);
+		cp->phdrs_count++;
+	}
+
+	/* One extra for the PT_NOTE */
+	cp->phdrs_count++;
+
+	fclose(fin);
+	return 0;
 }
