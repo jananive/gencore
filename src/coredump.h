@@ -31,4 +31,5 @@ struct core_proc {
 	int *t_id;			/* Threads_ids of all the threads */
 	struct maps *vmas;		/* VMAs */
 	int phdrs_count;		/* Number of Program headers */
+	int elf_class;			/* Elf class of the process */
 };

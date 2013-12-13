@@ -188,6 +188,11 @@ int do_coredump(int pid, char *core_file)
 	if (ret)
 		goto cleanup;
 
+	/* Compat Support */
+	cp.elf_class = ret = get_elf_class(pid, &cp);
+	if (ret == -1)
+		goto cleanup;
+
 cleanup:
 
 	/* Release the threads */

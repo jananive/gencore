@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <coredump.h>
+#include <elf.h>
 
 /* Get Process Stats */
 int get_pid_stat(int pid, struct pid_stat *ps)
@@ -230,4 +231,48 @@ int get_vmas(int pid, struct core_proc *cp)
 
 	fclose(fin);
 	return 0;
+}
+
+/* Check if its ELF */
+int check_elf_hdr(unsigned char *elf_ident)
+{
+	if (memcmp(elf_ident, ELFMAG, SELFMAG) != 0)
+		return -1;
+
+	return 0;
+}
+
+/* Get ELF Class */
+int get_elf_class(int pid, struct core_proc *cp)
+{
+	FILE *fin;
+	unsigned char elf_magic[EI_NIDENT];
+	char filename[40];
+	int ret;
+
+	snprintf(filename, 40, "/proc/%d/exe", pid);
+	fin = fopen(filename, "r");
+	if (fin == NULL) {
+		status = errno;
+		gencore_log("Failure while fetching the ELF header of the executable from %s.\n", filename);
+		return -1;
+	}
+
+	ret = fread(elf_magic, EI_NIDENT, 1, fin);
+	if (ret != 1) {
+		status = errno;
+		gencore_log("Failure while fetching the ELF header of the executable from %s.\n", filename);
+		fclose(fin);
+		return -1;
+	}
+
+	if (check_elf_hdr(elf_magic)) {
+		status = EINVAL;
+		gencore_log("Process to be dumped is not an ELF.\n");
+		return -1;
+	}
+
+	fclose(fin);
+
+	return elf_magic[EI_CLASS];
 }
