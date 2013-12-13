@@ -349,6 +349,38 @@ int setup_server(void)
 	return 0;
 }
 
+/* Blocking on a request */
+int block_on_request(void)
+{
+	fd_set read;
+
+	do {
+		/* Initialise */
+		FD_ZERO(&read);
+		FD_SET(socket_fd, &read);
+
+		gencore_log("[%d]: Waiting on incoming request.\n", pid_log);
+
+		if (select(socket_fd + 1, &read, NULL, NULL, NULL) <= 0) {
+			/*
+			 * EINTR just means a signal is caught and hence, we need not
+			 * terminate for this error.
+			 */
+			if (errno != EINTR) {
+				gencore_log("[%d]: Error while waiting for connection requests.\n",
+						pid_log, strerror(errno));
+				close(socket_fd);
+				return -1;
+			}
+		}
+
+	} while(FD_ISSET(socket_fd, &read) == 0);
+
+	gencore_log("[%d]: Request found.\n", pid_log);
+
+	return 0;
+}
+
 /* Daemon for self dump */
 int daemon_dump(void)
 {
@@ -385,6 +417,19 @@ int daemon_dump(void)
 
 	/* Flush the log */
 	fflush(fp_log);
+
+	while (1) {
+
+		/* Blocks on request */
+		ret = block_on_request();
+		if (ret)
+			goto cleanup;
+
+		/* Flush the log */
+		fflush(fp_log);
+	}
+
+	return 0;
 
 cleanup:
 
