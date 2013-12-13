@@ -446,6 +446,61 @@ int get_client_pid(struct ucred *client_info)
 	return 0;
 }
 
+/* Dumps the client process */
+int dump_task(struct ucred *client_info, char *core_file)
+{
+
+	char filename[40], cwd[CORE_FILE_NAME_SZ], corefile[CORE_FILE_NAME_SZ];
+	memset(filename, 0, 40);
+	memset(cwd, 0, CORE_FILE_NAME_SZ);
+	memset(corefile, 0, CORE_FILE_NAME_SZ);
+
+	if (setgid(client_info->gid)) {
+		send_reply(errno);
+		gencore_log("[%d]: Could not change GID:%s\n",
+				pid_log, strerror(errno));
+		return -1;
+	}
+
+	if (setuid(client_info->uid)) {
+		send_reply(errno);
+		gencore_log("[%d]: Could not change UID:%s\n",
+				pid_log, strerror(errno));
+		return -1;
+	}
+
+	/* Checking if UID was changed */
+	if (geteuid() != client_info->uid) {
+		send_reply(errno);
+		gencore_log("[%d]: Could not change UID:%s\n",
+				pid_log, strerror(errno));
+		return -1;
+	}
+
+	/* Converting the path to absolute path */
+	if (core_file[0] != '/') {
+		snprintf(filename, 40, "/proc/%d/cwd", client_info->pid);
+		readlink(filename, cwd, CORE_FILE_NAME_SZ);
+		snprintf(corefile, CORE_FILE_NAME_SZ, "%s/%s", cwd, core_file);
+	} else
+		strcpy(corefile, core_file);
+
+	if (do_coredump(client_info->pid, (char *)corefile)) {
+		send_reply(errno);
+		gencore_log("[%d]: Could not create core file %s.\n",
+						pid_log, corefile);
+		fflush(fp_log);
+		return -1;
+	}
+
+	gencore_log("[%d]: Core file %s created.\n", pid_log,
+							corefile);
+
+	send_reply(0);
+
+	return 0;
+}
+
 /* Services requests */
 int service_request(void)
 {
@@ -460,6 +515,11 @@ int service_request(void)
 
 	/* Fetch client PID */
 	ret = get_client_pid(&client_info);
+	if (ret)
+		goto cleanup;
+
+	/* Dump process */
+	ret = dump_task(&client_info, core_file);
 	if (ret)
 		goto cleanup;
 
