@@ -29,6 +29,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <elf.h>
+#include <errno.h>
+#include <syslog.h>
+#include <signal.h>
 #include <sys/ptrace.h>
 #include <coredump.h>
 
@@ -49,6 +52,13 @@ void gencore_log(char *fmt, ...)
 
 /* Core process object */
 struct core_proc cp;
+
+#ifndef GENCORE_DAEMON_LOGFILE
+#define GENCORE_DAEMON_LOGFILE "/var/log/gencored.log"
+#endif
+
+/* PID of Daemon */
+int pid_log;
 
 /* Initialised core process members */
 void init_core(void)
@@ -248,6 +258,31 @@ cleanup:
 /* Daemon for self dump */
 int daemon_dump(void)
 {
+	/* Check if daemon is running as root */
+	if (geteuid()) {
+		fprintf(stderr, "Run the daemon as root.\n");
+		return -1;
+	}
+
+	/* Daemonizing it */
+	if (daemon(0, 0)) {
+		fprintf(stderr, "Daemon not up %s.", strerror(errno));
+		return -1;
+	}
+
+	/* Get the PID of the daemon */
+	pid_log = getpid();
+
+	fp_log = fopen(GENCORE_DAEMON_LOGFILE, "w+");
+	if (fp_log == NULL) {
+		openlog("gencore_daemon_log", LOG_PID|LOG_CONS, LOG_USER);
+		syslog(LOG_DAEMON, "Could not open: %s.\n",
+					GENCORE_DAEMON_LOGFILE);
+		closelog();
+		return -1;
+	}
+
+	fclose(fp_log);
 	return 0;
 }
 
