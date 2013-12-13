@@ -22,6 +22,7 @@
  *      Suzuki K. Poulose <suzuki@in.ibm.com>
  */
 
+#define _GNU_SOURCE
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -430,14 +431,35 @@ int receive_core_filename(char *core_file)
 	return 0;
 }
 
+/* Get client details */
+int get_client_pid(struct ucred *client_info)
+{
+	socklen_t len = sizeof(struct ucred);
+	if (getsockopt(new_sock, SOL_SOCKET, SO_PEERCRED,
+				client_info, &len)) {
+		send_reply(errno);
+		gencore_log("[%d]: Can't get credentials of the client:%s\n",
+				pid_log, strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
 /* Services requests */
 int service_request(void)
 {
 	int ret;
 	char core_file[CORE_FILE_NAME_SZ];
+	struct ucred client_info;
 
 	/* Receive the message */
 	ret = receive_core_filename(core_file);
+	if (ret)
+		goto cleanup;
+
+	/* Fetch client PID */
+	ret = get_client_pid(&client_info);
 	if (ret)
 		goto cleanup;
 
