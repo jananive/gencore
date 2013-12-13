@@ -39,6 +39,8 @@
 
 #define roundup(x, y) ((((x) + ((y) - 1)) / (y)) * (y))
 
+#define ALIGN(addr, pagesize) (((addr) + (pagesize) - 1) & ~(pagesize - 1))
+
 /* Default alignment for program headers */
 #ifndef ELF_EXEC_PAGESIZE
 #define ELF_EXEC_PAGESIZE PAGESIZE
@@ -617,7 +619,6 @@ static int get_phdrs(int pid, struct core_proc *cp)
 	cp_phdrs[0].p_offset = 0;
 	cp_phdrs[0].p_vaddr = 0;
 	cp_phdrs[0].p_paddr = 0;
-	/* Will fill the size after filling notes */
 	cp_phdrs[0].p_filesz = 0;
 	cp_phdrs[0].p_memsz = 0;
 
@@ -671,6 +672,50 @@ static int get_phdrs(int pid, struct core_proc *cp)
 	return 0;
 }
 
+/* Updating the Offset */
+static void update_offset(struct core_proc *cp)
+{
+	Elf_Long data_offset = 0;
+	struct mem_note *note = cp->notes;
+	int i;
+	Elf_Phdr *cp_phdrs;
+	Elf_Ehdr *cp_elf;
+
+	cp_elf = (Elf_Ehdr *)cp->elf_hdr;
+	cp_phdrs = (Elf_Phdr *)cp->phdrs;
+
+	/* ELF HEADER */
+	data_offset += sizeof(Elf_Ehdr);
+
+	/* Program Headers */
+	data_offset += cp->phdrs_count * sizeof(Elf_Phdr);
+
+	/* Notes */
+	cp_phdrs[0].p_offset = data_offset;
+
+	/* Calucalating entire NOTES size */
+	while (note) {
+		data_offset += note->size;
+		note = note->next;
+	}
+
+	/* Filling PT_NOTE size */
+	cp_phdrs[0].p_filesz = data_offset - cp_phdrs[0].p_offset;
+
+	data_offset = ALIGN(data_offset, ELF_EXEC_PAGESIZE);
+
+	/* Populating offsets of Program Headers */
+	for (i = 1; i < cp->phdrs_count; i++) {
+		cp_phdrs[i].p_offset = data_offset;
+		data_offset += cp_phdrs[i].p_filesz;
+		data_offset = ALIGN(data_offset, ELF_EXEC_PAGESIZE);
+	}
+
+	/* Filling extra program header offset if phnum > PN_XNUM */
+	if (cp->phdrs_count > PN_XNUM)
+		cp_elf->e_shoff = data_offset;
+}
+
 int do_elf_coredump(int pid, struct core_proc *cp)
 {
 	int ret, i;
@@ -704,6 +749,9 @@ int do_elf_coredump(int pid, struct core_proc *cp)
 	ret = get_phdrs(pid, cp);
 	if (ret)
 		return -1;
+
+	/* Updating offset */
+	update_offset(cp);
 
 	return 0;
 }
