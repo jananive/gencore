@@ -26,9 +26,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <coredump.h>
 
 /* For logging all the messages */
 FILE *fp_log;
+
+/* Status of the dump */
+int status;
 
 /* Logging messages */
 void gencore_log(char *fmt, ...)

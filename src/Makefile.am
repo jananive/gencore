@@ -3,5 +3,5 @@ HAVE_SYSTEMD_SOCKET_SUPPORT = 0
 CFLAGS += -I. -DHAVE_SYSTEMD_SOCKET_SUPPORT='$(HAVE_SYSTEMD_SOCKET_SUPPORT)'
 
 bin_PROGRAMS = gencore
-gencore_SOURCES = coredump.c
+gencore_SOURCES = coredump.c proc.c
 
