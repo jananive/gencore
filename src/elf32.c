@@ -33,5 +33,6 @@
 #define Elf_Ehdr Elf32_Ehdr
 #define Elf_Phdr Elf32_Phdr
 #define Elf_Shdr Elf32_Shdr
+#define Elf_Nhdr Elf32_Nhdr
 
 #include "elf.c"

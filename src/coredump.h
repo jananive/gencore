@@ -25,6 +25,18 @@ struct maps {
 	char fname[0];
 };
 
+/*
+ * Structure for Notes
+ * We follow this linked list data-type as we dont know the number of notes
+ * as that depends on the architecture. Also the notebuf contains the final
+ * in-file format for the note data.
+ */
+struct mem_note {
+	unsigned char *notebuf;		/* Notes - type, name_sz, datasz, name and data */
+	unsigned int size;		/* Size of Note */
+	struct mem_note *next;
+};
+
 /* Structure for the Core of the Process */
 struct core_proc {
 	int thread_count;		/* Number of threads */
@@ -33,4 +45,5 @@ struct core_proc {
 	int phdrs_count;		/* Number of Program headers */
 	int elf_class;			/* Elf class of the process */
 	void *elf_hdr;			/* Stores the ELF_header */
+	struct mem_note *notes;		/* Head of Notes */
 };

@@ -166,6 +166,18 @@ int release_threads(void)
 	return ret;
 }
 
+/* Free Notes */
+void free_notes(struct mem_note *head)
+{
+	struct mem_note *tmp;
+
+	while (head) {
+		tmp = head->next;
+		free(head);
+		head = tmp;
+	}
+}
+
 /* Performs the core dump */
 int do_coredump(int pid, char *core_file)
 {
@@ -215,6 +227,9 @@ cleanup:
 
 	if (cp.elf_hdr)
 		free(cp.elf_hdr);
+
+	if (cp.notes)
+		free_notes(cp.notes);
 
 	errno = status;
 

@@ -30,6 +30,79 @@
 #include <linux/elf.h>
 #include "coredump.h"
 
+#define roundup(x, y) ((((x) + ((y) - 1)) / (y)) * (y))
+
+/* Appending the note to the list */
+static void append_note(struct mem_note *new_note, struct core_proc *cp)
+{
+	struct mem_note *tmp;
+
+	if (cp->notes == NULL)
+		cp->notes = new_note;
+	else {
+		tmp = cp->notes;
+		while (tmp->next != NULL)
+			tmp = tmp->next;
+		tmp->next = new_note;
+	}
+}
+
+/* Adding a new note */
+static int add_note(const char *name, int type, unsigned int data_sz, void *data,
+						struct core_proc *cp)
+{
+	unsigned char *ptr, *notebuf;
+	unsigned int namelen, size, data_offset;
+	Elf_Nhdr *note;
+	struct mem_note *tmp = malloc(sizeof(struct mem_note));
+	if (!tmp) {
+		status = errno;
+		gencore_log("Failure in adding note.\n");
+		return -1;
+	}
+
+	/* Calculate the size of the Notes */
+	namelen = strlen(name) + 1;
+	size = sizeof(Elf_Nhdr);
+	size += namelen;
+
+	/* Note down the offset where data is to be stored */
+	data_offset = size = roundup(size, 4);
+	size += data_sz;
+	size = roundup(size, 4);
+
+	/* Allocate the required size, initialized to 0 */
+	notebuf = calloc(1, size);
+	if (!notebuf) {
+		status = errno;
+		gencore_log("Could not allocate memory for Notes buffer.\n");
+		return -1;
+	}
+
+	note = (Elf_Nhdr *)notebuf;
+
+	/* Where name should be stored */
+	ptr = (unsigned char *) (note + 1);
+
+	note->n_type = type;
+	note->n_namesz = strlen(name) + 1;
+	note->n_descsz = data_sz;
+
+	/* Store name */
+	memcpy(ptr, name, namelen);
+
+	/* Store data */
+	memcpy(notebuf + data_offset, data, data_sz);
+
+	tmp->notebuf = notebuf;
+	tmp->size = size;
+	tmp->next = NULL;
+
+	append_note(tmp, cp);
+
+	return 0;
+}
+
 /* Fetchs ELF header of the executable */
 static int get_elf_hdr_exe_file(int pid, Elf_Ehdr *elf)
 {
