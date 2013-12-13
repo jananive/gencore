@@ -26,6 +26,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <dirent.h>
+#include <errno.h>
+#include <sys/ptrace.h>
 #include <coredump.h>
 
 /* For logging all the messages */
@@ -43,10 +46,154 @@ void gencore_log(char *fmt, ...)
 	va_end(argptr);
 }
 
+/* Core process object */
+struct core_proc cp;
+
+/* Initialised core process members */
+void init_core(void)
+{
+	memset(&cp, 0, sizeof(struct core_proc));
+}
+
+/* Gets the Thread IDS and siezes them */
+int seize_threads(int pid)
+{
+	char filename[40];
+	DIR *dir;
+	int ct = 0, ret = 0, tmp_tid;
+	struct dirent *entry;
+	char state;
+
+	ret = get_thread_count(pid);
+	if (ret == -1)
+		return -1;
+
+	cp.thread_count = ret;
+	cp.t_id = calloc(cp.thread_count, sizeof(int));
+	if (!cp.t_id) {
+		status = errno;
+		gencore_log("Could not allocate memory for thread_ids.\n");
+		return -1;
+	}
+
+	snprintf(filename, 40, "/proc/%d/task", pid);
+	dir = opendir(filename);
+
+	while ((entry = readdir(dir))) {
+		if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
+			tmp_tid = atoi(entry->d_name);
+			ret = ptrace(PTRACE_SEIZE, tmp_tid, 0, 0);
+			if (ret) {
+				state = get_thread_status(tmp_tid);
+				if (state == 'Z')
+					goto assign;
+				status = errno;
+				gencore_log("Could not seize thread: %d\n",
+								tmp_tid);
+				break;
+			}
+			ret = ptrace(PTRACE_INTERRUPT, tmp_tid, 0, 0);
+			if (ret) {
+				state = get_thread_status(tmp_tid);
+				if (state == 'Z')
+					goto assign;
+				status = errno;
+				gencore_log("Could not interrupt thread: %d\n",
+								tmp_tid);
+				break;
+			}
+assign:
+			/* If a new thread, is created after we fetch the thread_count,
+			 * we may encounter a buffer overflow situation in the cp_tid.
+			 * Hence we check this case and re-allocate memory if required.
+			 */
+			cp.t_id[ct++] = tmp_tid;
+		}
+	}
+
+	/* Reassigning based on successful seizes */
+	cp.thread_count = ct;
+
+	closedir(dir);
+
+	/* Successful seize and interrupt on all threads makes ret = 0 */
+	return ret;
+}
+
+/* Wait for threads to stop */
+int wait_for_threads_to_stop(void)
+{
+	int i;
+	char state;
+
+	/*
+	 * We check for the process to stop infinitely now. We need
+	 * to break out after some definite time. Need to work on
+	 * that.
+	 */
+	for (i = 0; i < cp.thread_count; i++) {
+		do {
+			state = get_thread_status(cp.t_id[i]);
+			if (state != 't')
+				sched_yield();
+		} while (state != 't' && state!='Z' && state != -1);
+		if (state == -1)
+			return -1;
+	}
+
+	return 0;
+}
+
+/* Release the threads that are held */
+int release_threads(void)
+{
+	int i, ret = 0;
+	char state;
+
+	/* Detach the process to be dumped */
+	for (i = 0; i < cp.thread_count; i++) {
+		state = get_thread_status(cp.t_id[i]);
+		if (state == 't') {
+			ret += ptrace(PTRACE_DETACH, cp.t_id[i], 0, 0);
+			if (ret)
+				gencore_log("Could not detach from thread: %d\n",
+								cp.t_id[i]);
+		}
+	}
+
+	/* Successful detach on all threads makes ret = 0 */
+	return ret;
+}
+
 /* Performs the core dump */
 int do_coredump(int pid, char *core_file)
 {
-	return 0;
+	int ret;
+
+	/* Initialise members of core process */
+	init_core();
+
+	/* Getting thread information and seizing them */
+	ret = seize_threads(pid);
+	if (ret)
+		goto cleanup;
+
+	/* Wait for threads to stop */
+	ret = wait_for_threads_to_stop();
+	if (ret)
+		goto cleanup;
+
+cleanup:
+
+	/* Release the threads */
+	release_threads();
+
+	if (cp.t_id)
+		free(cp.t_id);
+
+	errno = status;
+
+	return ret;
 }
 
 /* Daemon for self dump */

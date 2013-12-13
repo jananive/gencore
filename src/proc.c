@@ -24,6 +24,7 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <coredump.h>
 
 /* Get Process Stats */
@@ -83,4 +84,55 @@ int get_pid_stat(int pid, struct pid_stat *ps)
 err:
 	fclose(fin);
 	return ret;
+}
+
+/* Counts the number of threads in the process */
+int get_thread_count(int pid)
+{
+	struct pid_stat p;
+	int ret;
+
+	ret = get_pid_stat(pid, &p);
+	if (ret)
+		return -1;
+
+	return p.__ps_thread_count;
+}
+
+/* Fetched thread status */
+char get_thread_status(int tid)
+{
+	int ret;
+	char filename[40], buff[40];
+	FILE *fin;
+	char *pos;
+
+	snprintf(filename, 40, "/proc/%d/stat", tid);
+	fin = fopen(filename, "r");
+	if (fin == NULL) {
+		status = errno;
+		gencore_log("Failure while fetching thread state from %s.\n",
+								filename);
+		return -1;
+	}
+
+	ret = fread(buff, 40, 1, fin);
+	if (ret == 0) {
+		status = errno;
+		gencore_log("Failure while fetching thread state from %s.\n",
+								filename);
+		return -1;
+	}
+
+	pos = strrchr(buff, ')');
+	if (pos == NULL) {
+		status = errno;
+		gencore_log("Failure while fetching thread state from %s.\n",
+								filename);
+		return -1;
+	}
+
+	fclose(fin);
+
+	return buff[pos - buff + 2];
 }
