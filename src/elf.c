@@ -22,10 +22,106 @@
  *      Suzuki K. Poulose <suzuki@in.ibm.com>
  */
 
+#include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/uio.h>
+#include <linux/elf.h>
 #include "coredump.h"
+
+/* Fetchs ELF header of the executable */
+static int get_elf_hdr_exe_file(int pid, Elf_Ehdr *elf)
+{
+	char filename[40];
+	int ret;
+	FILE *fin;
+
+	snprintf(filename, 40, "/proc/%d/exe", pid);
+	fin = fopen(filename, "r");
+	if (fin == NULL) {
+		status = errno;
+		gencore_log("Failed to open %s for checking the ELF header.",
+								filename);
+		return -1;
+	}
+
+	ret = fread(elf, sizeof(*elf), 1, fin);
+	if (ret != 1) {
+		status = errno;
+		gencore_log("Failure while fetching the ELF header of the executable from %s.\n", filename);
+		fclose(fin);
+		return -1;
+	}
+
+	fclose(fin);
+
+	return 0;
+}
+
+/* Fills the ELF HEADER */
+static int fill_elf_header(int pid, struct core_proc *cp)
+{
+	Elf_Ehdr elf, *cp_elf;
+	int ret;
+
+	cp->elf_hdr = malloc(sizeof(Elf_Ehdr));
+	if (!cp->elf_hdr) {
+		status = errno;
+		gencore_log("Failure in allocating memory for ELF header.\n");
+		return -1;
+	}
+
+	cp_elf = (Elf_Ehdr *)cp->elf_hdr;
+
+	memset(cp_elf, 0, EI_NIDENT);
+
+	ret = get_elf_hdr_exe_file(pid, &elf);
+	if (ret == -1)
+		return -1;
+
+	/* Magic Number */
+	memcpy(cp_elf->e_ident, ELFMAG, SELFMAG);
+
+	cp_elf->e_ident[EI_CLASS] = elf.e_ident[EI_CLASS];
+	cp_elf->e_ident[EI_DATA] = elf.e_ident[EI_DATA];
+	cp_elf->e_ident[EI_VERSION] = EV_CURRENT;
+	cp_elf->e_ident[EI_OSABI] = EI_OSABI;
+
+	/* Rest of the fields */
+	cp_elf->e_entry = 0;
+	cp_elf->e_type = ET_CORE;
+	cp_elf->e_machine = elf.e_machine;
+	cp_elf->e_version = EV_CURRENT;
+	cp_elf->e_phoff = sizeof(Elf_Ehdr);
+	cp_elf->e_shoff = 0;
+	cp_elf->e_flags = 0;
+	cp_elf->e_ehsize =  sizeof(Elf_Ehdr);
+	cp_elf->e_phentsize = sizeof(Elf_Phdr);
+
+	if (cp->phdrs_count > PN_XNUM) {
+		cp_elf->e_phnum = PN_XNUM;
+		cp_elf->e_shentsize = sizeof(Elf_Shdr);
+		cp_elf->e_shnum = 1;
+	} else {
+		cp_elf->e_phnum = cp->phdrs_count;
+		cp_elf->e_shentsize = 0;
+		cp_elf->e_shnum = 0;
+	}
+
+	cp_elf->e_shstrndx = SHN_UNDEF;
+
+	return 0;
+}
 
 int do_elf_coredump(int pid, struct core_proc *cp)
 {
+	int ret;
+
+	/* Fill ELF Header */
+	ret = fill_elf_header(pid, cp);
+	if (ret)
+		return -1;
+
 	return 0;
 }

@@ -32,4 +32,5 @@ struct core_proc {
 	struct maps *vmas;		/* VMAs */
 	int phdrs_count;		/* Number of Program headers */
 	int elf_class;			/* Elf class of the process */
+	void *elf_hdr;			/* Stores the ELF_header */
 };

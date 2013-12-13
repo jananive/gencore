@@ -30,4 +30,8 @@
 
 #define do_elf_coredump do_elf32_coredump
 
+#define Elf_Ehdr Elf32_Ehdr
+#define Elf_Phdr Elf32_Phdr
+#define Elf_Shdr Elf32_Shdr
+
 #include "elf.c"

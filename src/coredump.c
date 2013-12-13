@@ -213,6 +213,9 @@ cleanup:
 	if (cp.vmas)
 		free_maps(cp.vmas);
 
+	if (cp.elf_hdr)
+		free(cp.elf_hdr);
+
 	errno = status;
 
 	return ret;
