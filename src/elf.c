@@ -26,11 +26,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/uio.h>
 #include <sys/procfs.h>
 #include <linux/elf.h>
 #include "elf-compat.h"
 #include "coredump.h"
+
+#define PAGESIZE getpagesize()
 
 #define roundup(x, y) ((((x) + ((y) - 1)) / (y)) * (y))
 
@@ -240,6 +244,70 @@ static int get_prpsinfo(int pid, struct core_proc *cp)
 	return add_note("CORE", NT_PRPSINFO, sizeof(prps), &prps, cp);
 }
 
+/* Populate auxillary vector */
+static int get_auxv(int pid, struct core_proc *cp)
+{
+	unsigned char buff[PAGESIZE];
+	char filename[40];
+	int ret, fd, pages;
+	unsigned char *ptr, *auxv;
+	unsigned int auxv_size;
+
+	snprintf(filename, 40, "/proc/%d/auxv", pid);
+
+	fd = open(filename, O_RDONLY);
+	if (fd < 0) {
+		status = errno;
+		gencore_log("Failure while fetching auxv data from %s.\n",
+								filename);
+		return -1;
+	}
+
+	auxv = malloc(PAGESIZE);
+	if (!auxv) {
+		status = errno;
+		gencore_log("Could not allocate memory for the auxv_buffer.\n");
+		close(fd);
+		return -1;
+	}
+	/* Position to copy the auxv data */
+	ptr = auxv;
+	pages = 1;
+	/*
+	 * We read the auxv data page by page and also we don't not
+	 * know the size of auxv, hence we read till ret becomes
+	 * lesser than PAGESIZE.
+	 */
+	while ((ret = read(fd, buff, PAGESIZE)) > 0) {
+		memcpy(ptr, buff, ret);
+		if (ret < PAGESIZE)   /* Finished reading */
+			break;
+		else {
+			/* We have more data to read */
+			pages++;
+			auxv = realloc(auxv, pages * PAGESIZE);
+			ptr = auxv + ((pages - 1) * PAGESIZE);
+		}
+	}
+	if (ret >= 0)
+		auxv_size = ((pages - 1) * PAGESIZE) + ret;
+	else {
+		status = errno;
+		gencore_log("Failure while fetching auxv data from %s.\n", filename);
+		close(fd);
+		free(auxv);
+		return -1;
+	}
+
+	/* Adding AUXV */
+	ret = add_note("CORE", NT_AUXV, auxv_size, auxv, cp);
+
+	close(fd);
+	free(auxv);
+
+	return ret;
+}
+
 int do_elf_coredump(int pid, struct core_proc *cp)
 {
 	int ret;
@@ -251,6 +319,11 @@ int do_elf_coredump(int pid, struct core_proc *cp)
 
 	/* Get prps_info */
 	ret = get_prpsinfo(pid, cp);
+	if (ret)
+		return -1;
+
+	/* Get Auxillary Vector */
+	ret = get_auxv(pid, cp);
 	if (ret)
 		return -1;
 
