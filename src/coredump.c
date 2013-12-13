@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <errno.h>
+#include <elf.h>
 #include <sys/ptrace.h>
 #include <coredump.h>
 
@@ -191,6 +192,14 @@ int do_coredump(int pid, char *core_file)
 	/* Compat Support */
 	cp.elf_class = ret = get_elf_class(pid, &cp);
 	if (ret == -1)
+		goto cleanup;
+
+	/* Do elf_dump */
+	if (cp.elf_class == ELFCLASS32)
+		ret = do_elf32_coredump(pid, &cp);
+	else
+		ret = do_elf64_coredump(pid, &cp);
+	if (ret)
 		goto cleanup;
 
 cleanup:
