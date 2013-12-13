@@ -70,4 +70,5 @@ struct core_proc {
 	struct mem_note *notes;		/* Head of Notes */
 	void *shdrs;			/* Extra Program Headers */
 	void *phdrs;			/* Program Headers */
+	char *corefile;			/* Name of the core file */
 };

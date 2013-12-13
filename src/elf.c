@@ -716,6 +716,71 @@ static void update_offset(struct core_proc *cp)
 		cp_elf->e_shoff = data_offset;
 }
 
+/* Writing into corefile */
+static int write_to_core(int pid, struct core_proc *cp)
+{
+	FILE *fcore;
+	int i, ret;
+	unsigned char *mem_segs;
+	struct iovec local, remote;
+	struct mem_note *note = cp->notes;
+	Elf_Phdr *cp_phdrs;
+	Elf_Ehdr *cp_elf;
+
+	cp_elf = (Elf_Ehdr *)cp->elf_hdr;
+	cp_phdrs = (Elf_Phdr *)cp->phdrs;
+
+	/* Writing to File */
+	fcore = fopen(cp->corefile, "wb");
+	if (fcore == NULL) {
+		status = errno;
+		gencore_log("Could not open: %s.\n", cp->corefile);
+		return -1;
+	}
+
+	/* ELF HEADER */
+	fwrite(cp->elf_hdr, sizeof(Elf_Ehdr), 1, fcore);
+
+	/* PROGRAM HEAERS */
+	for (i = 0; i < cp->phdrs_count; i++)
+		fwrite(&cp_phdrs[i], sizeof(Elf_Phdr), 1, fcore);
+
+	/* NOTES */
+	while (note) {
+		fwrite(note->notebuf, note->size, 1, fcore);
+		note = note->next;
+	}
+
+	/* MEMORY */
+	for (i = 1; i < cp->phdrs_count; i++) {
+		mem_segs = malloc(cp_phdrs[i].p_filesz * sizeof(unsigned char));
+		local.iov_base = mem_segs;
+		local.iov_len = cp_phdrs[i].p_filesz;
+		remote.iov_base = (void *) cp_phdrs[i].p_vaddr;
+		remote.iov_len = cp_phdrs[i].p_filesz;
+		if ((cp_phdrs[i].p_flags & PF_R))
+			ret = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+		if (ret == -1) {
+			status = errno;
+			gencore_log("Could not read memory from address: %llx.\n", cp_phdrs[i].p_vaddr);
+			fclose(fcore);
+			free(mem_segs);
+			return -1;
+		}
+
+		fseek(fcore, cp_phdrs[i].p_offset, SEEK_SET);
+		ret = fwrite(mem_segs, cp_phdrs[i].p_filesz, 1, fcore);
+		free(mem_segs);
+	}
+
+	/* Writing extra program headers if cp.phdrs_count > PN_XNUM */
+	if (cp->phdrs_count > PN_XNUM)
+		fwrite(cp->shdrs, sizeof(Elf_Shdr), 1, fcore);
+
+	fclose(fcore);
+	return 0;
+}
+
 int do_elf_coredump(int pid, struct core_proc *cp)
 {
 	int ret, i;
@@ -752,6 +817,11 @@ int do_elf_coredump(int pid, struct core_proc *cp)
 
 	/* Updating offset */
 	update_offset(cp);
+
+	/* Writing to core */
+	ret = write_to_core(pid, cp);
+	if (ret)
+		return -1;
 
 	return 0;
 }

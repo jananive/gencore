@@ -206,6 +206,9 @@ int do_coredump(int pid, char *core_file)
 	if (ret == -1)
 		goto cleanup;
 
+	/* Initialise core file name */
+	cp.corefile = core_file;
+
 	/* Do elf_dump */
 	if (cp.elf_class == ELFCLASS32)
 		ret = do_elf32_coredump(pid, &cp);
@@ -295,6 +298,8 @@ int main(int argc, char *argv[])
 
 		if (ret == -1)
 			gencore_log("Failed to create core file.\n");
+		else
+			fprintf(stdout, "Created core file.\n");
 	}
 
 	return ret;
