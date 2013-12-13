@@ -42,6 +42,11 @@
 /* Main Socket */
 int socket_fd;
 
+/* Accepted Socket */
+int new_sock;
+
+#define CORE_FILE_NAME_SZ 1000	/* Size of core file name */
+
 /* For logging all the messages */
 FILE *fp_log;
 
@@ -381,6 +386,100 @@ int block_on_request(void)
 	return 0;
 }
 
+/* Handles a SIGCHILD */
+void sigchild_handler(int sig)
+{
+	int pid;
+
+	pid = waitpid(0, &status, WNOHANG);
+
+	gencore_log("[%d]: Request handled by child with PID:%d and exited.\n",
+				pid_log, pid);
+}
+
+/* Sends message to client */
+int send_reply(int err)
+{
+	if (write(new_sock, &err , sizeof(err)) == -1) {
+		gencore_log("[%d]: Could not send message:%s\n",
+					pid_log, strerror(errno));
+		return -1;
+	}
+
+	gencore_log("[%d]: Message sent:%d\n", pid_log, err);
+
+	return 0;
+}
+
+/* Receive message from client */
+int receive_core_filename(char *core_file)
+{
+	memset(core_file, 0, CORE_FILE_NAME_SZ);
+	if (read(new_sock, core_file , CORE_FILE_NAME_SZ) == -1) {
+		send_reply(errno);
+		gencore_log("[%d]: Could not get Core file name:%s\n",
+					pid_log, strerror(errno));
+		return -1;
+	}
+
+	gencore_log("[%d]: Core file path received:%s\n", pid_log,
+						core_file);
+	/* Sending the acknowledgment */
+	send_reply(0);
+
+	return 0;
+}
+
+/* Services requests */
+int service_request(void)
+{
+	int ret;
+	char core_file[CORE_FILE_NAME_SZ];
+
+	/* Receive the message */
+	ret = receive_core_filename(core_file);
+	if (ret)
+		goto cleanup;
+
+cleanup:
+	close(new_sock);
+	if (ret == -1)
+		exit(EXIT_FAILURE);
+
+	exit(EXIT_SUCCESS);
+}
+
+/* Handles new requests */
+int handle_request(void)
+{
+	int pid_new;
+	struct sockaddr_un client_address;
+	socklen_t client_size = sizeof(client_address);
+
+	new_sock = accept(socket_fd, (struct sockaddr *) &client_address,
+							&client_size);
+	if (new_sock < 0) {
+		gencore_log("[%d]: Could not accept:%s\n", pid_log,
+							strerror(errno));
+		close(socket_fd);
+		fclose(fp_log);
+		return -1;
+	}
+
+	gencore_log("[%d]: Accepted.\n", pid_log);
+
+	gencore_log("[%d]: Handling request.\n", pid_log);
+
+	/* New thread to service request */
+	pid_new = fork();
+	if (pid_new == 0) {
+		pid_log = getpid();
+		service_request();
+	}
+
+	return 0;
+}
+
 /* Daemon for self dump */
 int daemon_dump(void)
 {
@@ -418,10 +517,21 @@ int daemon_dump(void)
 	/* Flush the log */
 	fflush(fp_log);
 
+	/* SIGCHILD - Signal handler */
+	signal(SIGCHLD, sigchild_handler);
+
 	while (1) {
 
 		/* Blocks on request */
 		ret = block_on_request();
+		if (ret)
+			goto cleanup;
+
+		/* Flush the log */
+		fflush(fp_log);
+
+		/* Handle new connections */
+		ret = handle_request();
 		if (ret)
 			goto cleanup;
 
