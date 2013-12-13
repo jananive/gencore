@@ -501,12 +501,29 @@ int dump_task(struct ucred *client_info, char *core_file)
 	return 0;
 }
 
+/* Handles signals to the child */
+void sig_handler_service_proc(int sig)
+{
+	if (sig != SIGPIPE)
+		send_reply(EINTR);
+	close(new_sock);
+
+	gencore_log("[%d]: Cleanup done and child exiting.\n", pid_log);
+
+	fflush(fp_log);
+}
+
 /* Services requests */
 int service_request(void)
 {
 	int ret;
 	char core_file[CORE_FILE_NAME_SZ];
 	struct ucred client_info;
+
+	/* Handles stopping of the servicing process */
+	signal(SIGTERM, sig_handler_service_proc);
+	signal(SIGSEGV, sig_handler_service_proc);
+	signal(SIGPIPE, sig_handler_service_proc);
 
 	/* Receive the message */
 	ret = receive_core_filename(core_file);
