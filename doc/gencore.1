@@ -1,0 +1,31 @@
+.\" Manpage for gencore.
+.\" Contact jananive@linux.vnet.ibm.in to correct errors or typos.
+.TH man 2 "11 Dec 2013" "1.0" "gencore man page"
+.SH NAME
+gencore \- generates coredump
+.SH SYNOPSIS
+gencore pid [output-file-name]
+.SH DESCRIPTION
+gencore takes a dump of the process whose PID is passed
+as a command line argument. If the output file name is
+specified,the core is dumped in that name, if not the
+default filename is core.pid.
+If through options we specify --daemon, in this case the
+gencore command helps in performing a selfdump.Any process
+can connect to this daemon created and request for a dump.
+
+.SH OPTIONS
+--daemon   Creates a daemon to perform selfdumps
+
+--socket   Performs selfdumps with systemd taking care of socket connections.
+	   For this we need to have the correct version of systemd which
+	   has this socket option enabled.
+
+.SH SEE ALSO
+ptrace(2), process_vm_readv(2), gencore(3)
+.SH BUGS
+No known bugs.
+.SH AUTHOR
+Janani Venkataraman <jananive@linux.vnet.ibm.com>
+
+Suzuki Poulose <suzuki@linux.vnet.ibm.com>

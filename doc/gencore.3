@@ -1,0 +1,28 @@
+.\" Manpage for libgencore.
+.\" Contact jananive@linux.vnet.ibm.in to correct errors or typos.
+.TH man 3 "11 Dec 2013" "1.0" "libgencore man page"
+.SH NAME
+gencore \- generates coredump
+.SH SYNOPSIS
+int gencore(char *corefile);
+.SH DESCRIPTION
+gencore takes a dump of the process who sends a message
+to the already running gencore daemon asking for a dump.
+The client or the requester specifies the corefile name
+and the dump is generated in the path specified. This name
+can be a relative or an absolute path.
+.SH RETURN VALUE
+gencore returns 0 on success and the appropriate error
+number on a failure.
+.SH ERRORS
+gencore() may fail and returns the errors for the individual operations
+performed by the daemon or server during the coredump generation.
+.SH OPTIONS
+.SH SEE ALSO
+ptrace(2), process_vm_readv(2), socket(2), listen(2), chmod(2),
+getsockopt(2), setuid(2), setgid(2), geteuid(2), daemon(3),
+bind(2), accept(2).
+.SH BUGS
+No known bugs.
+.SH AUTHOR
+Janani Venkataraman <jananive@linux.vnet.ibm.com>
