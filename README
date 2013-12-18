@@ -1,0 +1,108 @@
+-----------------------------------------------
+How to build and install the package -- src.rpm
+-----------------------------------------------
+
+a) Download the gencore-0.1-0.src.rpm
+b) Rebuild the src.rpm using the following command:
+	rpmbuild --rebuild gencore-0.1-0.src.rpm
+c) In the rpmbuild folder created install the RPMs in RPMS folder
+   through the following command:
+	rpm -ivh gencore-0.1-0.x86_64.rpm gencore-debuginfo-0.1-0.x86_64.rpm libgencore-0.1-0.x86_64.rpm libgencore-devel-0.1-0.x86_64.rpm
+c) The library and executables will be installed in /usr/bin
+   and /usr/lib64 and the daemon will be started automatically.
+
+----------------------------------------------
+How to build and install the package -- tar.gz
+----------------------------------------------
+
+a) Untar it firstly
+b) ./autoreconf --force --install
+c) ./configure --prefix="path"
+d) make
+e) make install
+
+The executable the the client libraries are installed in the path specified by
+the user.
+
+--------------------------------
+Command Line Arguments - gencore
+--------------------------------
+
+We can call the gencore command in two ways.
+a) gencore pid [output-file-name]
+b) gencore --daemon 
+   -- Creates a daemon, for aiding selfdumps.
+c) gencore --socket
+   -- Post installation, systemd will create the socket and listen for connections.
+      Once a process requests a selfdump, the service will be spawned to handle
+      the request. For this we need to have the correct version of systemd which
+      has this socket option enabled.
+
+In the first case, gencore performs a third party dump and we can specify the
+PID of the process to be dumped. The output-filename is optional. If not 
+specified, by default the core filename is core.pid and it is created in the CWD.
+
+In the second case, we start a daemon and we wait for requests from processes
+which requires a self dump. This daemon keeping waiting for such requests.
+It can handle multiple requests for the dump. This method was adapted from the
+CRIU self dump application.
+
+A process which wants a dump, uses the libgencore library and calls the function
+gencore(char *corefile).
+
+----------------------------------
+libgencore - gencore() -- selfdump
+----------------------------------
+
+A program can request a dump of itself. Such a dump is known as a self dump.
+This can be done by using the library libgencore and calling the function
+gencore(char *corefile).
+
+For a selfdump, we need to first start gencore --daemon like mentioned before.
+This daemon waits for requests for dumps. This is already done post installation.
+
+Then in the process, which requests for a dump, we need to call the function 
+gencore(char *absolute/relative pathname);
+
+We use libgencore library to set up this interface.
+
+eg. test.c
+
+#include <dlfcn.h>
+#include <stdio.h>
+#include <string.h>
+#include <signal.h>
+
+int (*gencore)(char *name);
+
+void segv_handler(int signo)
+{
+	int ret;
+
+	ret = gencore("/home/janani/demo/test_core");
+
+	fprintf(stderr, "Status of dump: %s\n", strerror(ret)); 	
+}
+	
+int main ()
+{
+	void *lib;
+
+	signal(SIGSEGV, segv_handler);
+	
+	/* Opening the library, in this case the library is present in the /usr/lib64 */
+	lib = dlopen("libgencore.so", RTLD_LAZY);
+
+	gencore = dlsym(lib, "gencore");
+
+	sleep(100);
+
+	return 0;
+}
+
+-------
+AUTHORS
+-------
+
+Janani Venkataraman <jananive@in.ibm.com>
+
