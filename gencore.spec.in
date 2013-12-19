@@ -1,0 +1,67 @@
+Name: gencore
+Version: @VERSION@
+Release: 0
+License: GPLv2
+Group: Applications/System
+Source: %{name}-%{version}.tar.gz
+Summary: Tool for capturing application core dump non-disruptively.
+
+%package -n libgencore
+Group: System Environment/Libraries
+Summary: Library interface for generating non-disruptive core dump.
+Requires: gencore == %{version}
+ 
+%package -n libgencore-devel
+Group: Development/Libraries
+Summary: libgencore development files
+
+%description
+This package, helps in taking non-disruptive coredumps of a process,
+when requested for. When the PID of a process is passed to this command,
+this command takes a dump of that process and stores the dump in the
+filename specified or by default core.pid in the current working directory.
+
+%description -n libgencore
+The library libgencore, sets up the interface for such dump
+requests and provides an API for initiating a dump of the running
+program via gencore daemon.
+
+%description -n libgencore-devel
+This package contains necessary header files for libgencore.
+
+%prep
+%setup
+
+%build
+%configure
+make
+
+%install
+make DESTDIR=$RPM_BUILD_ROOT install
+
+%files
+%doc README COPYING Changelog
+%{_bindir}/gencore
+%{_mandir}/man1/gencore.1*
+
+%files -n libgencore
+%doc COPYING.LIBGENCORE
+%{_libdir}/libgencore.so.*
+%{_mandir}/man3/gencore.3*
+
+%files -n libgencore-devel
+%{_includedir}/gencore.h
+%{_libdir}/libgencore.so
+%{_libdir}/libgencore.a
+%{_libdir}/libgencore.la
+%{_libdir}/pkgconfig/libgencore.pc
+
+%post -n libgencore
+ldconfig -n %{_libdir}/libgencore.so.*
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%changelog
+* Mon Dec 23 2013  - Janani Venkataraman <jananive@linux.vnet.ibm.com>
+- Initial Version
