@@ -1,0 +1,10 @@
+[Unit]
+Description=Gencore socket
+
+[Socket]
+ListenStream=/var/run/gencored.socket
+Accept=true
+
+[Install]
+WantedBy=socket.target
+

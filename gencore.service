@@ -1,0 +1,9 @@
+[Unit]
+Description=Gencore service
+
+[Service]
+Type=forking
+ExecStart=/usr/bin/gencore --daemon
+
+[Install]
+WantedBy=multi-user.target
