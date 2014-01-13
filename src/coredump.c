@@ -39,6 +39,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <coredump.h>
+#if HAVE_SYSTEMD_SOCKET_SUPPORT
+#include <sd-daemon.h>
+#endif
 
 /* Main Socket */
 int socket_fd;
@@ -670,6 +673,35 @@ cleanup:
 /* Systemd socket for self dump */
 int socket_dump(void)
 {
+	int n, ret;
+	char core_file[CORE_FILE_NAME_SZ];
+	struct ucred client_info;
+
+	/* Fetching the Socket ID from systemd */
+	n = sd_listen_fds(0);
+	if (n > 1) {
+		gencore_log("Too many file descriptors received.\n");
+		return -1;
+	} else if (n == 1)
+		new_sock = SD_LISTEN_FDS_START + 0;
+	else
+		return -1;
+
+	/* Receive the message */
+	ret = receive_core_filename(core_file);
+	if (ret)
+		return -1;
+
+	/* Fetch client PID */
+	ret = get_client_pid(&client_info);
+	if (ret)
+		return -1;
+
+	/* Dump process */
+	ret = dump_task(&client_info, core_file);
+	if (ret)
+		return -1;
+
 	return 0;
 }
 #endif
