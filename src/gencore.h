@@ -1,0 +1,1 @@
+int gencore(char *corefile);

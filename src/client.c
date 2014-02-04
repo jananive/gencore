@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <gencore.h>
 
 int setup_connection(void)
 {
@@ -53,6 +54,51 @@ int setup_connection(void)
 	return socket_fd;
 }
 
+/* Sends message to client */
+int send_core_filename(int socket_fd, char *corefile)
+{
+	if (write(socket_fd, corefile , strlen(corefile) + 1) == -1)
+		return errno;
+
+	return 0;
+}
+
+/* Receive message from client */
+int receive_reply(int socket_fd)
+{
+	int reply;
+
+	if (read(socket_fd, &reply , sizeof(reply)) == -1)
+		return errno;
+
+	return reply;
+}
+
+int dump_request(int socket_fd, char *corefile)
+{
+	int ret;
+
+	/* Sends request */
+	ret = send_core_filename(socket_fd, corefile);
+	if (ret)
+		goto cleanup;
+
+	/* Receives acknowledgment */
+	ret = receive_reply(socket_fd);
+	if (ret)
+		goto cleanup;
+
+	/* Receives status */
+	ret = receive_reply(socket_fd);
+	if (ret)
+		goto cleanup;
+
+cleanup:
+	close(socket_fd);
+
+	return ret;
+}
+
 int gencore(char *corefile)
 {
 	int socket, ret;
@@ -63,6 +109,11 @@ int gencore(char *corefile)
 		ret = errno;
 		goto cleanup;
 	}
+
+	/* Asks for a self dump */
+	ret = dump_request(socket, corefile);
+	if (ret)
+		goto cleanup;
 
 cleanup:
 
