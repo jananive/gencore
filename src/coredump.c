@@ -76,6 +76,17 @@ struct core_proc cp;
 /* PID of Daemon */
 int pid_log;
 
+/* Support Check */
+static int support_check(int pid, struct core_proc *cp)
+{
+	gencore_log("This build of gencore(32bit) cannot dump a 64bit process.\n");
+	return -1;
+}
+
+#if defined(__i386) || (defined(__s390__) && !defined(__s390x__)) || (defined(__PPC__) && !defined(__PPC64__))
+#define do_elf64_coredump support_check
+#endif
+
 /* Initialised core process members */
 void init_core(void)
 {

@@ -28,6 +28,7 @@
  * and operations once elf.c is included.
  */
 
+#if defined(__x86_64) || (defined(__s390x__) && defined(__s390__)) || (defined(__PPC64__) && defined(__PPC__))
 #define do_elf_coredump do_elf64_coredump
 
 #define Elf_Ehdr Elf64_Ehdr
@@ -40,3 +41,4 @@
 #define Elf_Addr Elf64_Addr
 
 #include "elf.c"
+#endif
