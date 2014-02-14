@@ -308,6 +308,79 @@ static int get_auxv(int pid, struct core_proc *cp)
 	return ret;
 }
 
+/*
+ * Get File Maps in the following format:
+ * long count     -- how many files are mapped
+ * long page_size -- units for file_ofs
+ * array of [COUNT] elements of
+ * long start
+ * long end
+ * long file_ofs
+ * followed by COUNT filenames in ASCII: "FILE1" NUL "FILE2" NUL...
+ */
+static int get_file_maps(struct core_proc *cp)
+{
+	Elf_Long count = 0;
+	Elf_Long fmap_size = 0, namesz = 0;
+	Elf_Long *fmap;
+	Elf_Long *data_pos;
+	unsigned char *name_pos;
+	int ret;
+	struct maps *map = cp->vmas;
+
+	/*
+	 * Finding the actual size of the file map for which we need
+	 * to know number of VMAS(non zero inode) plus the file name size
+	 * for each of the VMAS(non zero inode.
+	 */
+	while (map) {
+		if (map->inode) {
+			count++;
+			namesz += strlen(map->fname) + 1;
+		}
+		map = map->next;
+	}
+
+	/*
+	 * We add 2 for the count and page_size, 3 * (number of vmas)
+	 * for the start, end and file_ofs and finally the entire size
+	 * of the filenames of all the VMAS.
+	 */
+	fmap_size = ((2 + (3 * count)) * sizeof(Elf_Long))
+				+ (namesz * sizeof(unsigned char));
+
+	fmap = calloc(fmap_size, 1);
+	if (!fmap) {
+		status = errno;
+		gencore_log("Could not allocate memory for file map data\n");
+		return -1;
+	}
+
+	data_pos = fmap + 2;
+	name_pos = (unsigned char *)(fmap + 2 + (count * 3));
+
+	map = cp->vmas;
+	while (map) {
+		if (map->inode) {
+			*data_pos++ = map->src;
+			*data_pos++ = map->dst;
+			*data_pos++ = map->offset;
+
+			strcpy(name_pos, map->fname);
+			name_pos += strlen(map->fname) + 1;
+		}
+		map = map->next;
+	}
+
+	fmap[0] = count;
+	fmap[1] = 1;
+
+	ret = add_note("CORE", NT_FILE, fmap_size, fmap, cp);
+	free(fmap);
+
+	return ret;
+}
+
 int do_elf_coredump(int pid, struct core_proc *cp)
 {
 	int ret;
@@ -324,6 +397,11 @@ int do_elf_coredump(int pid, struct core_proc *cp)
 
 	/* Get Auxillary Vector */
 	ret = get_auxv(pid, cp);
+	if (ret)
+		return -1;
+
+	/* Get File maps */
+	ret = get_file_maps(cp);
 	if (ret)
 		return -1;
 
