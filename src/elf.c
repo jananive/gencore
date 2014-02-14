@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <sys/uio.h>
 #include <sys/procfs.h>
+#include <sys/ptrace.h>
 #include <linux/elf.h>
 #include "elf-compat.h"
 #include "coredump.h"
@@ -381,9 +382,195 @@ static int get_file_maps(struct core_proc *cp)
 	return ret;
 }
 
+/* Getting Registers */
+static int get_regset(int tid, int regset, struct iovec *iov)
+{
+	return ptrace(PTRACE_GETREGSET, tid, regset, iov);
+}
+
+/* Fetching Note */
+static int fetch_note(int regset, const char *name, struct core_proc *cp, int tid)
+{
+	int ret = 0;
+	int size = PAGESIZE;
+	struct iovec iov;
+	void *data;
+	data = malloc(PAGESIZE);
+	if (!data)
+		return -1;
+
+	/*
+	 * The size of regset being fetched may be greater than size,
+	 * which is initially PAGESIZE. The iov_len gets reset to the
+	 * amount of data read by PTRACE_GETREGSET. If the iov_len is
+	 * equal to size, in that case, there is more data to read and
+	 * hence we increase the size and try reading again. The moment
+	 * iov.len is lesser than size, we break out of the loop as all
+	 * the data is read
+	 */
+	while (1) {
+		iov.iov_base = data;
+		iov.iov_len = size;
+		ret = get_regset(cp->t_id[tid], (unsigned int) regset,
+							&iov);
+		if (ret)
+			break;
+		if (iov.iov_len < size)
+			break;
+		size += PAGESIZE;
+		data = realloc(data, size);
+		if (!data)
+			return -1;
+	}
+
+	/* Adding Note */
+	if (ret == 0)
+		ret = add_note(name, regset, iov.iov_len, data, cp);
+
+	free(data);
+
+	return ret;
+}
+
+/* Populates PRSTATUS for the threads */
+static int fill_core_notes(int tid, struct core_proc *cp)
+{
+	/* PRSTATUS */
+	struct iovec iov;
+	int ret;
+	struct Elf_prstatus prstat;
+	struct pid_stat p;
+	char state;
+
+	ret = get_pid_stat(cp->t_id[tid], &p);
+	if (ret)
+		return -1;
+
+	prstat.pr_pid = p.ps_pid;
+	prstat.pr_ppid = p.__ps_ppid;
+	prstat.pr_pgrp = p.__ps_pgrp;
+	prstat.pr_sid = p.__ps_sid;
+	prstat.pr_utime.tv_sec = p.__ps_utime;
+	prstat.pr_stime.tv_sec = p.__ps_stime;
+	prstat.pr_cutime.tv_sec = p.__ps_cutime;
+	prstat.pr_cstime.tv_sec = p.__ps_cstime;
+	prstat.pr_sigpend = p.__ps_sigpend;
+	prstat.pr_sighold = p.__ps_sighold;
+
+	/* General Purpose registers */
+	iov.iov_base = &prstat.pr_reg;
+	iov.iov_len =  sizeof(prstat.pr_reg);
+	ret = get_regset(cp->t_id[tid], NT_PRSTATUS, &iov);
+	if (ret == -1) {
+		state = get_thread_status(cp->t_id[tid]);
+		if (state != 'Z') {
+			status = errno;
+			gencore_log("Failure in fetching General Purpose registers for Thread:%d.\n", tid);
+			return -1;
+		}
+	}
+
+	prstat.pr_info.si_signo = 0;
+
+	/* FP_REGSET */
+	ret = fetch_note(NT_PRFPREG, "CORE", cp, tid);
+	if ( ret == 0)
+		prstat.pr_fpvalid = 1;
+	else
+		prstat.pr_fpvalid = 0;
+		
+	/* Adding PRSTATUS */
+	return add_note("CORE", NT_PRSTATUS, sizeof(prstat),
+						&prstat, cp);
+}
+
+/* X86 Specific Notes */
+static void fetch_x86_notes(struct core_proc *cp, int tid)
+{
+	int notes[] = {
+			NT_X86_XSTATE,
+			NT_386_TLS,
+			0};
+	int i;
+
+	for (i = 0; notes[i]; i++)
+		(void)fetch_note(notes[i], "LINUX", cp, tid);
+}
+
+/* PPC Specific Notes */
+static void fetch_ppc_notes(struct core_proc *cp, int tid)
+{
+	int notes[] = {
+			NT_PPC_VMX,
+			NT_PPC_SPE,
+			NT_PPC_VSX,
+			0};
+	int i;
+
+	for (i = 0; notes[i]; i++)
+		(void)fetch_note(notes[i], "LINUX", cp, tid);
+}
+
+/* S390 Specific Notes */
+static void fetch_s390_notes(struct core_proc *cp, int tid)
+{
+	int notes[] = {
+			NT_S390_HIGH_GPRS,
+			NT_S390_TIMER,
+			NT_S390_LAST_BREAK,
+			NT_S390_SYSTEM_CALL,
+			NT_S390_TODCMP,
+			NT_S390_TODPREG,
+			NT_S390_CTRS,
+			NT_S390_PREFIX,
+			0};
+	int i;
+
+	for (i = 0; notes[i]; i++)
+		(void)fetch_note(notes[i], "LINUX", cp, tid);
+}
+
+/* Fetching thread specific notes */
+static int fetch_thread_notes(struct core_proc *cp)
+{
+	int tid, ret;
+
+	Elf_Ehdr *cp_elf;
+	cp_elf = (Elf_Ehdr *)cp->elf_hdr;
+
+	/*
+	 * The architecture specific notes are optional and they may or may not
+	 * be present. Hence we do not check if we were successful in fetching
+	 * them or not.
+	 */
+
+	for (tid = 0; tid < cp->thread_count; tid++) {
+		ret = fill_core_notes(tid, cp);
+		if (ret)
+			return -1;
+
+		switch (cp_elf->e_machine) {
+		case EM_X86_64:
+		case EM_386:
+			fetch_x86_notes(cp, tid);
+			break;
+		case EM_PPC:
+		case EM_PPC64:
+			fetch_ppc_notes(cp, tid);
+			break;
+		case EM_S390:
+			fetch_s390_notes(cp, tid);
+			break;
+		}
+
+	}
+
+	return 0;
+}
+
 int do_elf_coredump(int pid, struct core_proc *cp)
 {
-	int ret;
+	int ret, i;
 
 	/* Fill ELF Header */
 	ret = fill_elf_header(pid, cp);
@@ -402,6 +589,11 @@ int do_elf_coredump(int pid, struct core_proc *cp)
 
 	/* Get File maps */
 	ret = get_file_maps(cp);
+	if (ret)
+		return -1;
+
+	/* Get the thread specific notes */
+	ret = fetch_thread_notes(cp);
 	if (ret)
 		return -1;
 

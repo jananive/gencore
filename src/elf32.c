@@ -36,5 +36,6 @@
 #define Elf_Nhdr Elf32_Nhdr
 #define Elf_prpsinfo compat_elf_prpsinfo
 #define Elf_Long int
+#define Elf_prstatus compat_elf_prstatus
 
 #include "elf.c"
