@@ -93,20 +93,121 @@ void init_core(void)
 	memset(&cp, 0, sizeof(struct core_proc));
 }
 
+/* Check if a particular TID is already added to cp.t_id */
+int search(int pid, int n)
+{
+	int first, last, middle;
+
+	first = 0;
+	last = n - 1;
+
+	while( first <= last ) {
+
+		middle = (first + last)/2;
+
+		if ( cp.t_id[middle] < pid )
+			first = middle + 1;
+		else if ( cp.t_id[middle] == pid )
+			return 1;
+		else
+			last = middle - 1;
+	}
+
+	return 0;
+}
+
+/* Insert a TID to cp.t_id */
+void insert (int tid, int n)
+{
+	int i, j, flag = 0;
+
+	for (i = 0; (i < n) && (tid > cp.t_id[i]); i++);
+
+	j = i;
+	while (j < n) {
+		cp.t_id[j + 1] = cp.t_id[j];
+		j++;
+	}
+
+	cp.t_id[i] = tid;
+}
+
+/*
+ * Read the directory /proc/pid/task again and again
+ * till we find no new threads.
+ */
+int scan_threads(int pid)
+{
+	DIR *dir;
+	struct dirent *entry;
+	int tmp_tid, ret = 0, k = 0;
+	char state;
+	char filename[40];
+
+	snprintf(filename, 40, "/proc/%d/task", pid);
+
+	dir = opendir(filename);
+
+	while ((entry = readdir(dir))) {
+		if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
+			tmp_tid = atoi(entry->d_name);
+			/*
+			 * Search for the thread, if not present, seize, interrupt
+			 * and insert it in cp.t_id.
+			 */
+			if (!search(tmp_tid, cp.thread_count)) {
+
+				k++;
+
+				ret = ptrace(PTRACE_SEIZE, tmp_tid, 0, 0);
+				if (ret) {
+					state = get_thread_status(tmp_tid);
+					if (state == 'Z')
+						goto assign;
+					status = errno;
+					gencore_log("Could not seize thread: %d\n",
+							tmp_tid);
+					break;
+				}
+
+				ret = ptrace(PTRACE_INTERRUPT, tmp_tid, 0, 0);
+				if (ret) {
+					state = get_thread_status(tmp_tid);
+					if (state == 'Z')
+						goto assign;
+					status = errno;
+					gencore_log("Could not interrupt thread: %d\n",
+							tmp_tid);
+					break;
+				}
+assign:
+				cp.t_id = (char *) realloc(cp.t_id, (cp.thread_count + 1) * sizeof(int));
+				if (!cp.t_id) {
+					status = errno;
+					gencore_log("Could not allocate memory for thread_ids.\n");
+					return -1;
+				}
+
+				insert(tmp_tid, cp.thread_count);
+				cp.thread_count ++;
+			}
+		}
+	}
+
+	closedir(dir);
+
+	if (!k)
+		return 1;
+
+	return ret;
+}
+
 /* Gets the Thread IDS and siezes them */
 int seize_threads(int pid)
 {
-	char filename[40];
-	DIR *dir;
-	int ct = 0, ret = 0, tmp_tid;
-	struct dirent *entry;
-	char state;
+	int ret = 0;
 
-	ret = get_thread_count(pid);
-	if (ret == -1)
-		return -1;
-
-	cp.thread_count = ret;
+	cp.thread_count = 0;
 	cp.t_id = calloc(cp.thread_count, sizeof(int));
 	if (!cp.t_id) {
 		status = errno;
@@ -114,47 +215,19 @@ int seize_threads(int pid)
 		return -1;
 	}
 
-	snprintf(filename, 40, "/proc/%d/task", pid);
-	dir = opendir(filename);
+	/*
+	 * Read the directory /proc/pid/task again and again
+	 * till we find no new threads.
+	 */
 
-	while ((entry = readdir(dir))) {
-		if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
-			tmp_tid = atoi(entry->d_name);
-			ret = ptrace(PTRACE_SEIZE, tmp_tid, 0, 0);
-			if (ret) {
-				state = get_thread_status(tmp_tid);
-				if (state == 'Z')
-					goto assign;
-				status = errno;
-				gencore_log("Could not seize thread: %d\n",
-								tmp_tid);
-				break;
-			}
-			ret = ptrace(PTRACE_INTERRUPT, tmp_tid, 0, 0);
-			if (ret) {
-				state = get_thread_status(tmp_tid);
-				if (state == 'Z')
-					goto assign;
-				status = errno;
-				gencore_log("Could not interrupt thread: %d\n",
-								tmp_tid);
-				break;
-			}
-assign:
-			/* If a new thread, is created after we fetch the thread_count,
-			 * we may encounter a buffer overflow situation in the cp_tid.
-			 * Hence we check this case and re-allocate memory if required.
-			 */
-			cp.t_id[ct++] = tmp_tid;
-		}
-	}
-
-	/* Reassigning based on successful seizes */
-	cp.thread_count = ct;
-
-	closedir(dir);
+	do {
+		ret = scan_threads(pid);
+	} while (ret == 0);
 
 	/* Successful seize and interrupt on all threads makes ret = 0 */
+	if (ret == 1)
+		return 0;
+
 	return ret;
 }
 
